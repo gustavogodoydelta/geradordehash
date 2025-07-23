@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gerador de Relatório Digital</title>
+
+  <!-- Bibliotecas e plugin na ordem correta -->
+  <script src="https://cdn.jsdelivr.net/npm/pizzip@3.0.5/dist/pizzip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docxtemplater@3.37.9/build/docxtemplater.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+  <!-- Plugin text-run-merger versão UMD para navegador -->
+  <script src="https://cdn.jsdelivr.net/npm/docxtemplater-text-run-merger@3.2.0/build/text-run-merger.umd.js"></script>
+
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    label { display: block; margin: 6px 0; }
+    input[type=text], input[type=date], input[type=time], input[type=email] {
+      width: 300px; padding: 6px; font-size: 1em;
+    }
+    table { border-collapse: collapse; margin-top: 10px; max-width: 600px; }
+    th, td { padding: 6px 12px; border: 1px solid black; word-break: break-word; }
+    h1, h2 { margin-bottom: 10px; }
+    button {
+      margin-top: 15px; padding: 10px 25px; font-size: 1rem; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Gerador de Relatório Digital</h1>
+
+<form id="dados">
+  <label>Data: <input type="date" id="data" required></label>
+  <label>Horário: <input type="time" id="horario" required></label>
+  <label>Município: <input type="text" id="municipio" required></label>
+  <label>Delegacia: <input type="text" id="delegacia" required></label>
+  <label>Endereço: <input type="text" id="endereco" required></label>
+  <label>Telefone: <input type="text" id="telefone"></label>
+  <label>CEP: <input type="text" id="cep"></label>
+  <label>E-mail: <input type="email" id="email"></label>
+  <label>Nome: <input type="text" id="nome" required></label>
+  <label>Cargo: <input type="text" id="cargo" required></label>
+</form>
+
+<hr />
+
+<h2>Arquivos de Evidência Digital</h2>
+<input type="file" id="arquivos" multiple />
+<table id="tabela-arquivos">
+  <thead>
+    <tr><th>Arquivo</th><th>Hash SHA-256</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<button id="gerar">Gerar Relatório</button>
+
+<script>
+const URL_TEMPLATE = 'https://gustavogodoydelta.github.io/geradordehash/modelo_relatorio.docx';
+
+async function fetchTemplate() {
+  const response = await fetch(URL_TEMPLATE);
+  if (!response.ok) throw new Error('Erro ao baixar o template do relatório');
+  return await response.arrayBuffer();
+}
+
+async function calcularHash(file) {
+  const buffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+const arquivosSelecionados = [];
+const tbody = document.querySelector('#tabela-arquivos tbody');
+
+document.getElementById('arquivos').addEventListener('change', async (evt) => {
+  tbody.innerHTML = '';
+  arquivosSelecionados.length = 0;
+  for (const file of evt.target.files) {
+    const hash = await calcularHash(file);
+    arquivosSelecionados.push({ nome: file.name, hash });
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${file.name}</td><td style="font-family: monospace;">${hash}</td>`;
+    tbody.appendChild(tr);
+  }
+});
+
+function lerCampos() {
+  const campos = ['data', 'horario', 'municipio', 'delegacia', 'endereco', 'telefone', 'cep', 'email', 'nome', 'cargo'];
+  const dados = {};
+  campos.forEach(id => dados[id] = document.getElementById(id).value.trim() || '');
+  return dados;
+}
+
+function formatarArqHash(arquivos) {
+  return arquivos.map(a => `${a.nome}\nHash sha256: ${a.hash}\n`).join('\n');
+}
+
+document.getElementById('gerar').onclick = async () => {
+  try {
+    const dados = lerCampos();
+
+    if (!dados.data || !dados.horario || !dados.municipio || !dados.delegacia || !dados.endereco || !dados.nome || !dados.cargo) {
+      alert('Por favor, preencha todos os campos obrigatórios.');
+      return;
+    }
+
+    if (arquivosSelecionados.length === 0) {
+      alert('Por favor, adicione pelo menos um arquivo de evidência.');
+      return;
+    }
+
+    const templateBuffer = await fetchTemplate();
+
+    const zip = new PizZip(templateBuffer);
+    const doc = new window.docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+      nullGetter: () => '',
+      delimiters: { start: '<<', end: '>>' }
+    });
+
+    doc.attachModule(new window.TextRunMerger());
+
+    const placeholders = {
+      'DATA': dados.data,
+      'HORARIO': dados.horario,
+      'Municipio': dados.municipio,
+      'DELEGACIA': dados.delegacia.toUpperCase(),
+      'DELEGACIA_RODAPE': dados.delegacia,
+      'Endereço': dados.endereco,
+      'Telefone': dados.telefone,
+      'CEP': dados.cep,
+      'EMAIL': dados.email,
+      'NOME': dados.nome,
+      'CARGO': dados.cargo,
+      'ARQ_HASHS': formatarArqHash(arquivosSelecionados),
+    };
+
+    doc.render(placeholders);
+
+    const blob = doc.getZip().generate({ type: 'blob' });
+
+    saveAs(blob, `relatorio_preservacao_${new Date().toISOString().slice(0,16).replace(/[-T:]/g,"")}.docx`);
+  }
+  catch (err) {
+    alert('Erro ao gerar relatório: ' + err.message);
+    console.error(err);
+  }
+};
+</script>
+
+</body>
+</html>
